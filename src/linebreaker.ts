@@ -1,10 +1,32 @@
-import UnicodeTrie from 'unicode-trie';
-import fs from 'fs';
-import base64 from 'base64-js';
-import { BK, CR, LF, NL, SG, WJ, SP, ZWJ, BA, HY, NS, AI, AL, CJ, HL, RI, SA, XX } from './classes';
-import { DI_BRK, IN_BRK, CI_BRK, CP_BRK, PR_BRK, pairTable } from './pairs';
+import UnicodeTrie from "./unicode-trie";
+import {
+  BK,
+  CR,
+  LF,
+  NL,
+  SG,
+  WJ,
+  SP,
+  ZWJ,
+  BA,
+  HY,
+  NS,
+  AI,
+  AL,
+  CJ,
+  HL,
+  RI,
+  SA,
+  XX,
+} from "./classes";
+import { DI_BRK, IN_BRK, CI_BRK, CP_BRK, PR_BRK, pairTable } from "./pairs";
+import data from "./trie-data";
 
-const data = base64.toByteArray(fs.readFileSync(__dirname + '/classes.trie', 'base64'));
+export interface TextLike {
+  charCodeAt(n: number): number;
+  length: number;
+}
+
 const classTrie = new UnicodeTrie(data);
 
 const mapClass = function (c) {
@@ -40,15 +62,20 @@ const mapFirst = function (c) {
 };
 
 class Break {
-  constructor(position, required = false) {
-    this.position = position;
-    this.required = required;
-  }
+  constructor(public position: number, public required = false) {}
 }
 
 class LineBreaker {
-  constructor(string) {
-    this.string = string;
+  node: TextLike;
+  pos: number;
+  lastPos: number;
+  curClass: number | null;
+  nextClass: number | null;
+  LB8a: boolean;
+  LB21a: boolean;
+  LB30a: number;
+
+  constructor(public string: string) {
     this.pos = 0;
     this.lastPos = 0;
     this.curClass = null;
@@ -63,9 +90,9 @@ class LineBreaker {
     const next = this.string.charCodeAt(this.pos);
 
     // If a surrogate pair
-    if ((0xd800 <= code && code <= 0xdbff) && (0xdc00 <= next && next <= 0xdfff)) {
+    if (0xd800 <= code && code <= 0xdbff && 0xdc00 <= next && next <= 0xdfff) {
       this.pos++;
-      return ((code - 0xd800) * 0x400) + (next - 0xdc00) + 0x10000;
+      return (code - 0xd800) * 0x400 + (next - 0xdc00) + 0x10000;
     }
 
     return code;
@@ -98,7 +125,7 @@ class LineBreaker {
   getPairTableBreak(lastClass) {
     // if not handled already, use the pair table
     let shouldBreak = false;
-    switch (pairTable[this.curClass][this.nextClass]) {
+    switch (pairTable[this.curClass!][this.nextClass!]) {
       case DI_BRK: // Direct break
         shouldBreak = true;
         break;
@@ -134,13 +161,13 @@ class LineBreaker {
       shouldBreak = false;
       this.LB21a = false;
     } else {
-      this.LB21a = (this.curClass === HL);
+      this.LB21a = this.curClass === HL;
     }
 
     // Rule LB30a
     if (this.curClass === RI) {
       this.LB30a++;
-      if (this.LB30a == 2 && (this.nextClass === RI)) {
+      if (this.LB30a == 2 && this.nextClass === RI) {
         shouldBreak = true;
         this.LB30a = 0;
       }
@@ -159,7 +186,7 @@ class LineBreaker {
       let firstClass = this.nextCharClass();
       this.curClass = mapFirst(firstClass);
       this.nextClass = firstClass;
-      this.LB8a = (firstClass === ZWJ);
+      this.LB8a = firstClass === ZWJ;
       this.LB30a = 0;
     }
 
@@ -169,7 +196,10 @@ class LineBreaker {
       this.nextClass = this.nextCharClass();
 
       // explicit newline
-      if ((this.curClass === BK) || ((this.curClass === CR) && (this.nextClass !== LF))) {
+      if (
+        this.curClass === BK ||
+        (this.curClass === CR && this.nextClass !== LF)
+      ) {
         this.curClass = mapFirst(mapClass(this.nextClass));
         return new Break(this.lastPos, true);
       }
@@ -181,7 +211,7 @@ class LineBreaker {
       }
 
       // Rule LB8a
-      this.LB8a = (this.nextClass === ZWJ);
+      this.LB8a = this.nextClass === ZWJ;
 
       if (shouldBreak) {
         return new Break(this.lastPos);
